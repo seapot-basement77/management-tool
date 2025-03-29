@@ -1,113 +1,102 @@
-// pages/workspace/index.tsx（簡略化されたバージョン）
-import { useState } from "react";
+// pages/workspace/index.tsx
 import Sidebar from "../../components/Sidebar";
-import ChannelArea from "../../components/ChannelArea";
+import ChannelList from "../../components/ChannelList";
+import ChannelChat from "../../components/ChannelChat";
+import ChannelForm from "../../components/CreateChannelForm";
+import TaskChannelList from "../../components/TaskChannelList";
 import DMArea from "../../components/DMArea";
 import Activity from "../../components/Activity";
+import TaskArea from "../../components/TaskArea";
 import { Message } from "../../types/Message";
 import { Notification } from "../../types/Notification";
+import { useSession } from "next-auth/react";
+import { useEffect, useState } from "react";
+import { useChannelStore } from "../../store/ChannelStore";
+
 
 export default function WorkspaceHome() {
   const [currentTab, setCurrentTab] = useState("Home");
-  const [channels, setChannels] = useState(["general", "random"]);
-  const [selectedChannel, setSelectedChannel] = useState("general");
-  const [messagesByChannel, setMessagesByChannel] = useState<Record<string, Message[]>>({
-    general: [],
-    random: [],
-  });
-
-  const [users, setUsers] = useState(["Alice", "Bob"]);
+  const channels = useChannelStore((state) => state.channels);
+  const setChannels = useChannelStore((state) => state.setChannels);
+  const selectedChannel = useChannelStore((state) => state.selectedChannel);
+  const setSelectedChannel = useChannelStore((state) => state.setSelectedChannel);
+  useEffect(() => {
+    const fetchChannels = async () => {
+      try {
+        const res = await fetch("/api/channels");
+        if (!res.ok) {
+          throw new Error("API fetch failed with status " + res.status);
+        }
+        const data = await res.json();
+        setChannels(data);
+        if (data.length > 0) {
+          setSelectedChannel(data[0].name); // 初期選択
+        }
+      } catch (err) {
+        console.error("チャネル取得エラー:", err);
+      }
+    };
+    fetchChannels();
+  }, [setChannels, setSelectedChannel]);
+  const [messagesByChannel, setMessagesByChannel] = useState<Record<string, Message[]>>({});
+  const [users, setUsers] = useState<string[]>(["Alice", "Bob"]);
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [messagesByUser, setMessagesByUser] = useState<Record<string, Message[]>>({});
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const { data: session, status } = useSession();
 
-  const extractMentions = (text: string) => {
-    return users.filter((u) => text.includes(`@${u}`));
-  };
+  if (status === "loading") {
+    return <div style={{ color: "#fff", padding: "2rem" }}>Loading...</div>;
+  }
 
-  const updateMessages = (channel: string, newMessage: string) => {
-    const mentions = extractMentions(newMessage);
-    const messageObj: Message = {
-      text: newMessage,
-      user: "You",
-      timestamp: new Date().toLocaleString(),
+  if (status === "unauthenticated") {
+    return <div style={{ color: "#fff", padding: "2rem" }}>ログインが必要です</div>;
+  }
+
+  const currentUser = session?.user?.name || "ゲスト";
+  const mockUsers = ["Alice", "Bob", "Charlie"];
+
+
+  const handleSendMessage = (text: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+
+    const mentionRegex = /@([a-zA-Z0-9_]+)/g;
+    const mentionMatches = [...text.matchAll(mentionRegex)];
+    const mentionedUsers = mentionMatches.map((match) => match[1]);
+
+    const newMessage: Message = {
+      text,
+      user: currentUser,
+      timestamp,
       reactions: [],
-      mentions,
+      mentions: mentionedUsers,
     };
+
     setMessagesByChannel((prev) => ({
       ...prev,
-      [channel]: [...(prev[channel] || []), messageObj],
+      [selectedChannel]: [...(prev[selectedChannel] || []), newMessage],
     }));
-    mentions.forEach((targetUser) => {
-      setNotifications((prev) => [
-        ...prev,
-        {
-          type: "mention",
-          sourceUser: "You",
-          targetUser,
-          targetChannel: channel,
-          message: newMessage,
-          timestamp: new Date().toLocaleString(),
-        },
-      ]);
-    });
-  };
 
-  const updateUserMessages = (user: string, newMessage: string) => {
-    const mentions = extractMentions(newMessage);
-    const messageObj: Message = {
-      text: newMessage,
-      user: "You",
-      timestamp: new Date().toLocaleString(),
-      reactions: [],
-      mentions,
-    };
-    setMessagesByUser((prev) => ({
-      ...prev,
-      [user]: [...(prev[user] || []), messageObj],
+    const mentionNotifications: Notification[] = mentionedUsers.map((targetUser) => ({
+      type: "mention",
+      sourceUser: currentUser,
+      targetUser,
+      message: text,
+      timestamp,
     }));
-    mentions.forEach((targetUser) => {
-      setNotifications((prev) => [
-        ...prev,
-        {
-          type: "mention",
-          sourceUser: "You",
-          targetUser,
-          targetUserDM: user,
-          message: newMessage,
-          timestamp: new Date().toLocaleString(),
-        },
-      ]);
-    });
-  };
 
-  const addUser = (user: string) => {
-    const trimmed = user.trim();
-    if (!trimmed || users.includes(trimmed)) return;
-    setUsers([...users, trimmed]);
-    setMessagesByUser((prev) => ({ ...prev, [trimmed]: [] }));
+    setNotifications((prev) => [...prev, ...mentionNotifications]);
   };
-
-  const deleteUser = (user: string) => {
-    const updated = users.filter((u) => u !== user);
-    setUsers(updated);
-    setMessagesByUser((prev) => {
-      const newMap = { ...prev };
-      delete newMap[user];
-      return newMap;
-    });
-    if (selectedUser === user) {
-      setSelectedUser(null);
-    }
-  };
-
-  const onReactMessage = (index: number, emoji: string) => {
+  
+  const handleReactMessage = (index: number, emoji: string) => {
     setMessagesByChannel((prev) => {
-      const updated = [...prev[selectedChannel]];
-      updated[index] = {
-        ...updated[index],
-        reactions: [...updated[index].reactions, emoji],
-      };
+      const updated = [...(prev[selectedChannel] || [])];
+      const msg = updated[index];
+      const already = msg.reactions.find((r) => r.user === currentUser && r.emoji === emoji);
+      msg.reactions = already
+        ? msg.reactions.filter((r) => !(r.user === currentUser && r.emoji === emoji))
+        : [...msg.reactions, { user: currentUser, emoji }];
+      updated[index] = msg;
       return { ...prev, [selectedChannel]: updated };
     });
 
@@ -115,28 +104,73 @@ export default function WorkspaceHome() {
       ...prev,
       {
         type: "reaction",
-        sourceUser: "You",
+        sourceUser: currentUser,
         targetChannel: selectedChannel,
         emoji,
-        timestamp: new Date().toLocaleString(),
+        timestamp: new Date().toLocaleTimeString(),
       },
     ]);
   };
+
+  const handleReactDM = (index: number, emoji: string) => {
+    if (!selectedUser) return;
+    setMessagesByUser((prev) => {
+      const updated = [...(prev[selectedUser] || [])];
+      const msg = updated[index];
+      const already = msg.reactions.find((r) => r.user === currentUser && r.emoji === emoji);
+      msg.reactions = already
+        ? msg.reactions.filter((r) => !(r.user === currentUser && r.emoji === emoji))
+        : [...msg.reactions, { user: currentUser, emoji }];
+      updated[index] = msg;
+      return { ...prev, [selectedUser]: updated };
+    });
+  };
+
+  const handleDeleteChannel = async (channelId: string) => {
+    const res = await fetch(`/api/channels/delete?id=${channelId}`, {
+      method: "DELETE",
+    });
+  
+    if (res.ok) {
+      const updated = await fetch("/api/channels");
+      if (updated.ok) {
+        const data = await updated.json();
+        setChannels(data);
+        if (selectedChannel === data.name) {
+          setSelectedChannel(data[0]?.name || "");
+        }
+      }
+    } else {
+      alert("削除失敗！");
+    }
+ };
+  
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
       <Sidebar currentTab={currentTab} setCurrentTab={setCurrentTab} />
 
       {currentTab === "Home" && (
-        <ChannelArea
-          channels={channels}
-          setChannels={setChannels}
-          selectedChannel={selectedChannel}
-          setSelectedChannel={setSelectedChannel}
-          messages={messagesByChannel[selectedChannel] || []}
-          onSendMessage={(msg) => updateMessages(selectedChannel, msg)}
-          onReactMessage={onReactMessage}
-        />
+        <>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <ChannelList
+              channels={channels}
+              selectedChannel={selectedChannel}
+              setSelectedChannel={setSelectedChannel} 
+              onDeleteChannel={handleDeleteChannel} />
+
+            <ChannelForm/>
+          </div>
+
+          <ChannelChat
+            selectedChannel={selectedChannel}
+            messages={messagesByChannel[selectedChannel] || []}
+            onSendMessage={handleSendMessage}
+            onReactMessage={handleReactMessage}
+            currentUser={currentUser}
+            users={users}
+          />
+        </>
       )}
 
       {currentTab === "DM" && (
@@ -144,21 +178,52 @@ export default function WorkspaceHome() {
           users={users}
           selectedUser={selectedUser}
           setSelectedUser={setSelectedUser}
-          addUser={addUser}
-          deleteUser={deleteUser}
+          addUser={(u) => setUsers((prev) => [...prev, u])}
+          deleteUser={(u) => setUsers((prev) => prev.filter((user) => user !== u))}
           messages={selectedUser ? messagesByUser[selectedUser] || [] : []}
-          onSendMessage={(msg) => selectedUser && updateUserMessages(selectedUser, msg)}
+          onSendMessage={(msg) => {
+            if (!selectedUser) return;
+            const newMsg: Message = {
+              text: msg,
+              user: currentUser,
+              timestamp: new Date().toLocaleTimeString(),
+              reactions: [],
+            };
+            setMessagesByUser((prev) => ({
+              ...prev,
+              [selectedUser]: [...(prev[selectedUser] || []), newMsg],
+            }));
+          }}
+          onReactMessage={handleReactDM}
+          currentUser={currentUser}
         />
       )}
 
-      {currentTab === "Activity" && <Activity notifications={notifications} />}
+      {currentTab === "Task" && (
+        <>
+          <TaskChannelList
+            channels={channels}
+            selectedChannel={selectedChannel}
+            setSelectedChannel={setSelectedChannel}
+          />
+          <TaskArea selectedChannel={selectedChannel} users={mockUsers} />
+          </>
+      )}
 
-      {currentTab !== "Home" && currentTab !== "DM" && currentTab !== "Activity" && (
+      {currentTab === "Calendar" && (
         <div style={{ flex: 1, padding: "2rem", backgroundColor: "#2a2c30", color: "#fff" }}>
-          {currentTab === "Task" && <div>✅ タスクタブ：タスクリスト</div>}
-          {currentTab === "Calendar" && <div>📅 カレンダー：予定表</div>}
-          {currentTab === "Meeting" && <div>🎦 ミーティング：会議情報</div>}
+          📅 カレンダータブ：予定表
         </div>
+      )}
+
+      {currentTab === "Meeting" && (
+        <div style={{ flex: 1, padding: "2rem", backgroundColor: "#2a2c30", color: "#fff" }}>
+          🎦 ミーティング：会議情報
+        </div>
+      )}
+
+      {currentTab === "Activity" && (
+        <Activity notifications={notifications} />
       )}
     </div>
   );

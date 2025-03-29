@@ -12,6 +12,8 @@ interface Props {
   messages: Message[];
   onSendMessage: (msg: string) => void;
   onReactMessage: (index: number, emoji: string) => void;
+  currentUser: string;
+  users: string[];
 }
 
 const ChannelArea = ({
@@ -22,6 +24,8 @@ const ChannelArea = ({
   messages,
   onSendMessage,
   onReactMessage,
+  currentUser,
+  users,
 }: Props) => {
   return (
     <>
@@ -31,11 +35,14 @@ const ChannelArea = ({
         selectedChannel={selectedChannel}
         setSelectedChannel={setSelectedChannel}
       />
+
       <ChannelChat
         selectedChannel={selectedChannel}
         messages={messages}
         onSendMessage={onSendMessage}
         onReactMessage={onReactMessage}
+        currentUser={currentUser}
+        users={users}
       />
     </>
   );

@@ -1,9 +1,12 @@
-// types/Message.ts
+export interface Reaction {
+  user: string;
+  emoji: string;
+}
 
-export type Message = {
-    text: string;
-    user: string;
-    timestamp: string;
-    reactions: string[];
-    mentions: string[];
-  };
+export interface Message {
+  text: string;
+  user: string;
+  timestamp: string;
+  reactions: Reaction[];
+  mentions?: string[];
+}
