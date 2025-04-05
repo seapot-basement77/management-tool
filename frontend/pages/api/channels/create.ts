@@ -1,50 +1,60 @@
+// pages/api/channels/create.ts
+import { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
-import { PrismaClient } from "@prisma/client";
-import { NextApiRequest, NextApiResponse } from "next";
-
-const prisma = new PrismaClient();
+import { prisma } from "../../../../lib/prisma";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== "POST") return res.status(405).end();
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method Not Allowed" });
+  }
 
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user?.email) {
-    console.log("❌ セッション情報なし:", session);
+    console.error("❌ セッションなし");
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const { name } = req.body;
+  const { name, workspaceId } = req.body;
+
+  if (!name || !workspaceId) {
+    return res.status(400).json({ error: "Name and Workspace ID are required" });
+  }
 
   try {
-    console.log("📨 セッション情報:", session);
-    console.log("📨 リクエストボディ:", req.body);
-
+    // ユーザーがそのワークスペースに所属してるか確認
     const user = await prisma.user.findUnique({
       where: { email: session.user.email },
+      include: { workspaces: true },
     });
 
     if (!user) {
-      console.log("❌ 該当ユーザーが見つかりません:", session.user.email);
+      console.error("❌ ユーザーが存在しない");
       return res.status(404).json({ error: "User not found" });
     }
 
-    console.log("✅ ユーザー情報:", user);
+    const isMember = user.workspaces.some(ws => ws.id === workspaceId);
+    if (!isMember) {
+      console.error("❌ ワークスペースに所属していないため作成不可");
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
+    // チャネルを作成し、workspaceIdを登録
     const newChannel = await prisma.channel.create({
       data: {
         name,
+        workspaceId,
         users: {
           connect: { id: user.id },
         },
       },
     });
 
-    console.log("✅ 新しいチャネル作成成功:", newChannel);
+    console.log("✅ チャネル作成成功:", newChannel);
     res.status(200).json(newChannel);
 
   } catch (err) {
-    console.error("🔥 チャネル作成中にエラー:", err);
+    console.error("🔥 チャネル作成エラー:", err);
     res.status(500).json({ error: "Failed to create channel" });
   }
 }

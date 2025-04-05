@@ -12,11 +12,18 @@ import { Notification } from "../../types/Notification";
 import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { useChannelStore } from "../../store/ChannelStore";
+import { useWorkspaceStore } from "../../store/workspaceStore";
 
 
 export default function WorkspaceHome() {
   const [currentTab, setCurrentTab] = useState("Home");
   const channels = useChannelStore((state) => state.channels);
+  const [messagesByChannel, setMessagesByChannel] = useState<Record<string, Message[]>>({});
+  const [users, setUsers] = useState<string[]>(["Alice", "Bob"]);
+  const [selectedUser, setSelectedUser] = useState<string | null>(null);
+  const [messagesByUser, setMessagesByUser] = useState<Record<string, Message[]>>({});
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const { data: session, status } = useSession();
   const setChannels = useChannelStore((state) => state.setChannels);
   const selectedChannel = useChannelStore((state) => state.selectedChannel);
   const setSelectedChannel = useChannelStore((state) => state.setSelectedChannel);
@@ -38,12 +45,34 @@ export default function WorkspaceHome() {
     };
     fetchChannels();
   }, [setChannels, setSelectedChannel]);
-  const [messagesByChannel, setMessagesByChannel] = useState<Record<string, Message[]>>({});
-  const [users, setUsers] = useState<string[]>(["Alice", "Bob"]);
-  const [selectedUser, setSelectedUser] = useState<string | null>(null);
-  const [messagesByUser, setMessagesByUser] = useState<Record<string, Message[]>>({});
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const { data: session, status } = useSession();
+
+  const { setWorkspaces, setCurrentWorkspace } = useWorkspaceStore();
+
+  useEffect(() => {
+    const fetchWorkspaces = async () => {
+      try {
+        const res = await fetch('/api/workspace/list');
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        const data = await res.json();
+        setWorkspaces(data);
+      } catch (error) {
+        console.error('Failed to fetch workspaces:', error);
+      }
+    };
+
+    fetchWorkspaces();
+  }, [setWorkspaces, setCurrentWorkspace]); 
+  const { currentWorkspace } = useWorkspaceStore();
+
+  useEffect(() => {
+    if (!currentWorkspace) return;
+
+  // ワークスペースごとのチャネル取得など
+    fetch(`/api/workspace/${currentWorkspace.id}/channels`);
+  }, [currentWorkspace]);
+
 
   if (status === "loading") {
     return <div style={{ color: "#fff", padding: "2rem" }}>Loading...</div>;
@@ -146,6 +175,7 @@ export default function WorkspaceHome() {
  };
   
 
+ 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
       <Sidebar currentTab={currentTab} setCurrentTab={setCurrentTab} />

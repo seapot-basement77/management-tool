@@ -1,8 +1,17 @@
-// pages/index.tsx
 import { useSession, signIn, signOut } from "next-auth/react";
+import { useEffect } from "react";
+import { useRouter } from "next/router";
 
 export default function Home() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
+  const router = useRouter();
+
+  // 👇 ログイン済みなら /onboarding に遷移
+  useEffect(() => {
+    if (status === "authenticated") {
+      router.push("/workspace/onboarding");
+    }
+  }, [status, router]);
 
   return (
     <div
@@ -35,7 +44,7 @@ export default function Home() {
               Googleアカウントでログインして始めよう
             </p>
             <button
-              onClick={() => signIn("google", { callbackUrl: "/workspace" })}
+              onClick={() => signIn("google", { callbackUrl: "/onboarding" })}
               style={{
                 padding: "0.8rem 1.6rem",
                 backgroundColor: "#fff",

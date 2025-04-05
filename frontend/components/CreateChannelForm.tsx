@@ -1,15 +1,18 @@
-// components/CreateChannelForm.tsx
 import { useState } from "react";
 import { useChannelStore } from "../store/ChannelStore";
+import { useRouter } from "next/router";
 
 const CreateChannelForm = () => {
   const [channelName, setChannelName] = useState("");
   const setChannels = useChannelStore((state) => state.setChannels);
+  const router = useRouter();
+  const workspaceId = router.query.id as string; // URLからworkspaceId
 
   const handleCreate = async () => {
-    if (!channelName.trim()) return;
+    if (!channelName.trim() || !workspaceId) return;
 
-    const res = await fetch("/api/channels/create", {
+    // 🔥 ここを修正！
+    const res = await fetch(`/api/workspace/${workspaceId}/channels`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: channelName }),
@@ -18,7 +21,7 @@ const CreateChannelForm = () => {
     if (res.ok) {
       setChannelName("");
 
-      const updated = await fetch("/api/channels");
+      const updated = await fetch(`/api/workspace/${workspaceId}/channels`);
       if (updated.ok) {
         const data = await updated.json();
         setChannels(data);
@@ -29,14 +32,12 @@ const CreateChannelForm = () => {
   };
 
   return (
-    <div
-      style={{
-        width: "240px",              // ChannelList と同じ幅
-        background: "#1e1f22",       // 背景色も合わせる
-        padding: "1rem",             // 内側の余白
-        borderRight: "1px solid #333", // 境界線（任意）
-      }}
-    >
+    <div style={{
+      width: "240px",
+      background: "#1e1f22",
+      padding: "1rem",
+      borderRight: "1px solid #333",
+    }}>
       <input
         value={channelName}
         onChange={(e) => setChannelName(e.target.value)}
@@ -44,7 +45,7 @@ const CreateChannelForm = () => {
         style={{
           padding: "0.5rem",
           marginBottom: "0.5rem",
-          width: "100%",              // 横幅いっぱいに
+          width: "100%",
           borderRadius: "6px",
           border: "none",
         }}

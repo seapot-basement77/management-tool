@@ -1,31 +1,79 @@
 // components/ChannelList.tsx
-// ✅ Prismaの型は使わず、自前定義
+import { useWorkspaceStore } from "../store/workspaceStore";
+import { useChannelStore } from "../store/ChannelStore";
+import { useRouter } from "next/router";
 
 interface Channel {
   id: string;
   name: string;
 }
 
-
 interface Props {
   channels: Channel[];
   selectedChannel: string;
   setSelectedChannel: (channelName: string) => void;
-  onDeleteChannel: (channelId: string) => void;
 }
 
-const ChannelList = ({ channels, selectedChannel, setSelectedChannel, onDeleteChannel }: Props) => {
+const ChannelList = ({ channels, selectedChannel, setSelectedChannel }: Props) => {
+  const { currentWorkspace } = useWorkspaceStore();
+  const setChannels = useChannelStore((state) => state.setChannels);
+  const router = useRouter();
+  const workspaceId = router.query.id as string;
+
+  const handleDeleteChannel = async (channelId: string) => {
+    if (!workspaceId) return;
+
+    const res = await fetch(`/api/channels/delete?id=${channelId}`, {
+      method: "DELETE",
+    });
+
+    if (res.ok) {
+      // 削除後にチャンネル一覧をリロード
+      const updated = await fetch(`/api/workspace/${workspaceId}/channels`);
+      if (updated.ok) {
+        const data = await updated.json();
+        setChannels(data);
+      }
+    } else {
+      alert("チャネル削除に失敗しました");
+    }
+  };
+
   return (
     <div
       style={{
         width: "240px",
-        background: "#1e1f22", // ← 統一ポイント①
+        background: "#1e1f22",
         color: "white",
-        padding: "1rem", // ← 統一ポイント②
+        padding: "1rem",
         borderRight: "1px solid #333",
-        borderBottom: "1px solid #333", // フォームとの境目調整用（任意）
+        borderBottom: "1px solid #333",
       }}
     >
+      <h2
+        style={{
+          fontSize: "1.2rem",
+          marginBottom: "1rem",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        {currentWorkspace?.name || "Workspace"}
+        <button
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "#ccc",
+            cursor: "pointer",
+          }}
+          onClick={() => alert("将来的に：メンバー招待 or 設定を開く")}
+        >
+          ⚙️
+        </button>
+      </h2>
+
       <h3 style={{ marginBottom: "1rem" }}>📂 チャネル</h3>
       <ul style={{ listStyle: "none", padding: 0 }}>
         {channels.map((channel) => (
@@ -47,7 +95,7 @@ const ChannelList = ({ channels, selectedChannel, setSelectedChannel, onDeleteCh
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onDeleteChannel(channel.id);
+                handleDeleteChannel(channel.id); // ✅ ここを自前のhandleDeleteに
               }}
               style={{
                 background: "transparent",
