@@ -3,6 +3,7 @@ import { NextApiRequest, NextApiResponse } from "next";
 import { prisma } from "../../../../../lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../../auth/[...nextauth]";
+import { Workspace } from "../../../../types/Workspace";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getServerSession(req, res, authOptions);
@@ -18,7 +19,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    // まずワークスペースに所属しているか確認
+    // ユーザー情報取得して、ワークスペースメンバーか確認
     const user = await prisma.user.findUnique({
       where: { email: session.user.email },
       include: { workspaces: true },
@@ -28,14 +29,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(404).json({ error: "User not found" });
     }
 
-    const isMember = user.workspaces.some(ws => ws.id === workspaceId);
+    const isMember = user.workspaces.some((ws: Workspace) => ws.id === workspaceId);
     if (!isMember) {
       return res.status(403).json({ error: "Forbidden: not a member of this workspace" });
     }
 
-    // リクエストによって分岐
     if (req.method === "GET") {
-      // 📄 チャネル一覧取得
+      // 🚫 キャッシュ禁止 → 必ず最新チャネルリストを返す！
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+
       const channels = await prisma.channel.findMany({
         where: { workspaceId },
         include: { users: true },
@@ -43,9 +45,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
 
       return res.status(200).json(channels);
+    }
 
-    } else if (req.method === "POST") {
-      // ➕ 新しいチャネル作成
+    if (req.method === "POST") {
       const { name } = req.body;
       if (!name || typeof name !== "string") {
         return res.status(400).json({ error: "Channel name is required" });
@@ -54,10 +56,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const newChannel = await prisma.channel.create({
         data: {
           name,
-          workspace: { connect: { id: workspaceId } }, // ワークスペース紐づけ！！
-          users: { connect: { id: user.id } },          // 作成者も紐づけ！！
+          workspace: { connect: { id: workspaceId } },
+          users: { connect: { id: user.id } },
         },
       });
+
+      console.log("✅ チャンネル作成成功:", newChannel);
+
+      // これも念のため no-store
+      res.setHeader("Cache-Control", "no-store, max-age=0");
 
       return res.status(201).json(newChannel);
     }
@@ -69,3 +76,4 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(500).json({ error: "Internal server error" });
   }
 }
+

@@ -10,9 +10,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const session = await getServerSession(req, res, authOptions);
-
   if (!session?.user?.email) {
-    console.error("❌ セッションなし");
     return res.status(401).json({ error: "Unauthorized" });
   }
 
@@ -23,7 +21,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    // チャンネル取得 → どのワークスペースに属しているか確認
     const channel = await prisma.channel.findUnique({
       where: { id: channelId },
       include: { workspace: true },
@@ -34,33 +31,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(404).json({ error: "Channel not found" });
     }
 
-    // ユーザーがそのワークスペースに属しているか確認
+    const workspaceId = channel.workspaceId;
+
     const user = await prisma.user.findUnique({
       where: { email: session.user.email },
       include: { workspaces: true },
     });
 
     if (!user) {
-      console.error("❌ ユーザーが存在しない");
       return res.status(404).json({ error: "User not found" });
     }
 
-    const isMember = user.workspaces.some(ws => ws.id === channel.workspaceId);
+    const isMember = user.workspaces.some((ws: { id: string }) => ws.id === workspaceId);
     if (!isMember) {
       console.error("❌ ワークスペースに属してないから削除禁止");
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    // チャネル削除
     await prisma.channel.delete({
       where: { id: channelId },
     });
 
     console.log("✅ チャネル削除成功:", channelId);
-    res.status(200).json({ message: "Channel deleted" });
+    return res.status(200).json({ message: "Channel deleted" });
 
   } catch (error) {
     console.error("🔥 チャネル削除エラー:", error);
-    res.status(500).json({ error: "Failed to delete channel" });
+    return res.status(500).json({ error: "Failed to delete channel" });
   }
 }

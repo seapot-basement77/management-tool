@@ -3,6 +3,7 @@ import { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { prisma } from "../../../../lib/prisma";
+import { Workspace } from "../../../types/Workspace";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
@@ -11,7 +12,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user?.email) {
-    console.error("❌ セッションなし");
     return res.status(401).json({ error: "Unauthorized" });
   }
 
@@ -22,39 +22,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    // ユーザーがそのワークスペースに所属してるか確認
     const user = await prisma.user.findUnique({
       where: { email: session.user.email },
       include: { workspaces: true },
     });
 
     if (!user) {
-      console.error("❌ ユーザーが存在しない");
       return res.status(404).json({ error: "User not found" });
     }
 
-    const isMember = user.workspaces.some(ws => ws.id === workspaceId);
+    const isMember = user.workspaces.some((ws: Workspace) => ws.id === workspaceId);
     if (!isMember) {
-      console.error("❌ ワークスペースに所属していないため作成不可");
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    // チャネルを作成し、workspaceIdを登録
     const newChannel = await prisma.channel.create({
       data: {
         name,
         workspaceId,
-        users: {
-          connect: { id: user.id },
-        },
+        users: { connect: { id: user.id } },
       },
+      select: { id: true, name: true }, // ← 作成直後に返すフィールドを絞る！！
     });
 
     console.log("✅ チャネル作成成功:", newChannel);
-    res.status(200).json(newChannel);
-
+    return res.status(201).json(newChannel); // ← 200じゃなくて201がベター
   } catch (err) {
     console.error("🔥 チャネル作成エラー:", err);
-    res.status(500).json({ error: "Failed to create channel" });
+    return res.status(500).json({ error: "Failed to create channel" });
   }
 }
+

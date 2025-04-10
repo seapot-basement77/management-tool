@@ -29,6 +29,7 @@ model User {
   accounts       Account[]
   sessions       Session[]
   createdAt      DateTime   @default(now())
+  reactions   Reaction[]
 }
 
 model Account {
@@ -70,11 +71,37 @@ model Channel {
 }
 
 model Message {
-  id         String   @id @default(cuid())
-  text       String
-  timestamp  DateTime @default(now())
-  user       User     @relation(fields: [userId], references: [id])
-  userId     String
-  channel    Channel? @relation(fields: [channelId], references: [id])
-  channelId  String?
+  id        String   @id @default(uuid())
+  text      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  timestamp DateTime @default(now())
+  userId    String
+  channelId String
+  parentId  String?   // 追加（リプライ用）
+  fileUrl   String?   // 追加（ファイル添付URL）
+  fileType  String?   // 追加（ファイルタイプ）
+  reactions   Reaction[]
+  user      User     @relation(fields: [userId], references: [id])
+  channel   Channel  @relation(fields: [channelId], references: [id])
+  parent    Message? @relation("ReplyParent", fields: [parentId], references: [id])
+  replies   Message[] @relation("ReplyParent")
+
+  @@index([channelId])
+  @@index([userId])
+}
+
+
+model Reaction {
+  id        String   @id @default(uuid())
+  emoji     String
+  userId    String
+  messageId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id])
+  message Message @relation(fields: [messageId], references: [id])
+
+  @@index([userId])
+  @@index([messageId])
 }

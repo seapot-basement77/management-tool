@@ -1,3 +1,4 @@
+// auth/[...nextauth].ts
 import NextAuth, { NextAuthOptions, Session, User } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
@@ -37,16 +38,12 @@ export const authOptions: NextAuthOptions = {
     },
 
     async jwt({ token, user }: { token: JWT; user?: User }) {
-      // サインイン直後
       if (user) {
         token.id = user.id;
         token.email = user.email ?? "";
         token.name = user.name ?? "";
         token.image = user.image ?? "";
-      }
-
-      // サインイン以外（ページリロード後など）
-      if (!token.id && token.email) {
+      } else if (token.email && !token.id) {
         const dbUser = await prisma.user.findUnique({
           where: { email: token.email },
         });
@@ -54,12 +51,10 @@ export const authOptions: NextAuthOptions = {
           token.id = dbUser.id;
         }
       }
-
       return token;
     },
 
     async session({ session, token }: { session: Session; token: JWT }) {
-      console.log("✅ SESSION token情報:", token);
       if (session.user) {
         session.user.id = token.id as string;
         session.user.email = token.email as string;
@@ -70,11 +65,35 @@ export const authOptions: NextAuthOptions = {
     },
 
     async redirect({ baseUrl, url }: { baseUrl: string; url: string }) {
-      const isDefaultSignIn = url.startsWith("/api/auth/callback");
-      if (isDefaultSignIn) {
-        return `${baseUrl}/onboarding`;
+      const isAuthCallback = url.startsWith("/api/auth/callback");
+      if (!isAuthCallback) return url;
+
+      try {
+        console.log("🚀 ログイン後リダイレクト判定開始");
+
+        // セッション取得
+        const user = await prisma.user.findFirst({
+          where: {
+            emailVerified: {
+              not: null,
+            },
+          },
+          include: {
+            workspaces: true,
+          },
+        });
+
+        if (user?.workspaces && user.workspaces.length > 0) {
+          console.log("✅ 既存ワークスペースあり -> /workspace");
+          return `${baseUrl}/workspace`; // すでにワークスペースに所属していれば、ワークスペースへ
+        } else {
+          console.log("ℹ️ ワークスペースなし -> onboarding");
+          return `${baseUrl}/workspace/onboarding`; // 所属していなければ、onboardingへ
+        }
+      } catch (error) {
+        console.error("❌ リダイレクトエラー:", error);
+        return `${baseUrl}/workspace/onboarding`; // エラー時もonboarding
       }
-      return url;
     },
   },
   session: {

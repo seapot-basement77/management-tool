@@ -46,7 +46,7 @@ const Sidebar = ({ currentTab, setCurrentTab }: Props) => {
       style={{
         width: "80px",
         height: "100vh",
-        backgroundColor: "#1e1f22",
+        backgroundColor: "#3E0A45", // Slack風の紫色
         color: "#fff",
         padding: "1rem 0.5rem",
         boxSizing: "border-box",
@@ -56,6 +56,7 @@ const Sidebar = ({ currentTab, setCurrentTab }: Props) => {
         gap: "1rem",
         position: "relative",
         overflow: "visible",
+        boxShadow: "0 2px 10px rgba(0, 0, 0, 0.3)", // シャドウ追加
       }}
     >
       {/* ワークスペースアイコン */}
@@ -65,14 +66,14 @@ const Sidebar = ({ currentTab, setCurrentTab }: Props) => {
           width: "48px",
           height: "48px",
           borderRadius: "12px",
-          backgroundColor: "#5865f2",
+          backgroundColor: "#5865f2", // アイコンの色
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           cursor: "pointer",
           fontWeight: "bold",
           fontSize: "1.2rem",
-          boxShadow: "0 2px 6px rgba(0,0,0,0.5)",
+          boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
           transition: "background-color 0.2s",
         }}
         title={currentWorkspace?.name}
@@ -80,14 +81,14 @@ const Sidebar = ({ currentTab, setCurrentTab }: Props) => {
         {currentWorkspace?.name[0]?.toUpperCase() ?? "?"}
       </div>
 
-      {/* ドロップダウンメニュー */}
+      {/* ワークスペースドロップダウン */}
       {isDropdownOpen && (
         <div
           style={{
             position: "absolute",
             top: "60px",
             left: "80px",
-            backgroundColor: "#2f3136",
+            backgroundColor: "#2F3136", // ダークグレー
             borderRadius: "8px",
             boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
             padding: "0.8rem",
@@ -110,6 +111,7 @@ const Sidebar = ({ currentTab, setCurrentTab }: Props) => {
                 padding: "0.6rem",
                 borderRadius: "6px",
                 cursor: "pointer",
+                transition: "background-color 0.2s",
               }}
             >
               <div
@@ -150,14 +152,14 @@ const Sidebar = ({ currentTab, setCurrentTab }: Props) => {
               marginTop: "0.5rem",
               padding: "0.6rem",
               borderRadius: "6px",
-              backgroundColor: "#3c4043",
+              backgroundColor: "#333",
               color: "#bbb",
               textAlign: "center",
               cursor: "pointer",
               fontSize: "0.9rem",
             }}
           >
-            ➕ ワークスペースを作成・参加
+            ➕ 新しいワークスペース
           </div>
         </div>
       )}
@@ -170,18 +172,20 @@ const Sidebar = ({ currentTab, setCurrentTab }: Props) => {
             onClick={() => setCurrentTab(item.name)}
             title={item.name}
             style={{
-              fontSize: "1.5rem",
+              fontSize: "1.3rem",
               background: "transparent",
               border: "none",
               color: "#fff",
               padding: "0.5rem",
               borderRadius: "8px",
               cursor: "pointer",
-              backgroundColor: currentTab === item.name ? "#35363a" : "transparent",
+              backgroundColor: currentTab === item.name ? "#2F3136" : "transparent",
               transition: "background-color 0.2s",
+              textAlign: "center",
             }}
           >
-            {item.icon}
+            <div>{item.icon}</div>
+            <div style={{ fontSize: "0.8rem", marginTop: "0.2rem" }}>{item.name}</div>
           </button>
         ))}
       </nav>

@@ -1,3 +1,4 @@
+// types/next-auth.d.ts
 import { DefaultSession } from "next-auth";
 
 declare module "next-auth" {
@@ -7,6 +8,7 @@ declare module "next-auth" {
       email: string;
       name?: string | null;
       image?: string | null;
+      hasWorkspace: boolean; // ⭐ 追加！
     } & DefaultSession["user"];
   }
 
@@ -21,5 +23,6 @@ declare module "next-auth/jwt" {
     email: string;
     name?: string | null;
     image?: string | null;
+    hasWorkspace: boolean; // ⭐ 追加！
   }
 }

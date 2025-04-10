@@ -1,114 +1,216 @@
-// components/ChannelChat.tsx
-import { useState, KeyboardEvent, useRef } from "react";
+import { useState, useRef, useEffect, ChangeEvent, KeyboardEvent } from "react";
 import { Message } from "../types/Message";
+import { Notification } from "../types/Notification";
 import ReactionSelector from "./ReactionSelector";
-import { JSX } from "react";
+import ThreadArea from "./ThreadArea";
+import {JSX} from "react";
+import Image from "next/image"; // 👈 必須
+import ImageModal from "./ImageModal"; // ← 追加
 
 interface Props {
   selectedChannel: string;
   messages?: Message[];
-  onSendMessage: (msg: string) => void;
-  onReactMessage: (index: number, emoji: string) => void;
+  onReactMessage: (index: number, emoji: string) => Promise<"added" | "removed">;
   currentUser: string;
   users: string[];
+  addNotification: (notification: Notification) => void;
 }
 
-const ChannelChat = ({ selectedChannel, messages = [], onSendMessage, onReactMessage, currentUser, users }: Props) => {
+const ChannelChat = ({
+  selectedChannel,
+  messages = [],
+  onReactMessage,
+  currentUser,
+  addNotification,
+}: Props) => {
   const [input, setInput] = useState("");
-  const [selectedReactions, setSelectedReactions] = useState<Record<number, string | null>>({});
-  const [mentionCandidates, setMentionCandidates] = useState<string[]>([]);
-  const [showMentionList, setShowMentionList] = useState(false);
-  const [mentionIndex, setMentionIndex] = useState(0);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [openThreadMessage, setOpenThreadMessage] = useState<Message | null>(null);
+  const [localMessages, setLocalMessages] = useState<Message[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isReacting, setIsReacting] = useState(false);
+  const [modalImageUrl, setModalImageUrl] = useState<string | null>(null);
 
-  const handleSend = () => {
+  useEffect(() => {
+    setLocalMessages(messages);
+  }, [messages]);
+
+  // 普通メッセージ送信
+  const handleSendChannelMessage = async (text: string, file?: File | null): Promise<Message | undefined> => {
+    if (!selectedChannel) return;
+    const formData = new FormData();
+    formData.append("text", text);
+    if (file) formData.append("file", file);
+
+    const res = await fetch(`/api/channels/${selectedChannel}/messages`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (res.ok) {
+      const newMessage: Message = await res.json();
+      setLocalMessages((prev) => [...prev, newMessage]);
+      return newMessage;
+    } else {
+      console.error("メッセージ送信エラー:", await res.json());
+    }
+  };
+
+  // スレッド返信送信
+  const handleSendThreadReply = async (text: string, parentMessage: Message, file?: File | null): Promise<Message | undefined> => {
+    if (!selectedChannel) return;
+    const formData = new FormData();
+    formData.append("text", text);
+    formData.append("replyToMessageId", parentMessage.id);
+    if (file) formData.append("file", file);
+
+    const res = await fetch(`/api/channels/${selectedChannel}/messages`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (res.ok) {
+      const newReply: Message = await res.json();
+      return newReply;
+    } else {
+      console.error("スレッド返信送信エラー:", await res.json());
+    }
+  };
+
+  // メッセージ送信ボタン押下
+  const handleSend = async () => {
     const trimmed = input.trim();
-    if (!trimmed) return;
-    onSendMessage(trimmed);
+    if (!trimmed && !selectedFile) return;
+
+    if (openThreadMessage) {
+      const newReply = await handleSendThreadReply(trimmed, openThreadMessage, selectedFile);
+      if (newReply) {
+        setOpenThreadMessage((prev) => {
+          if (!prev) return null;
+          return { ...prev, replies: [...(prev.replies || []), newReply] };
+        });
+        setLocalMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === openThreadMessage.id
+              ? { ...msg, replies: [...(msg.replies || []), newReply] }
+              : msg
+          )
+        );
+      }
+    } else {
+      await handleSendChannelMessage(trimmed, selectedFile);
+    }
+
     setInput("");
-    setMentionCandidates([]);
-    setShowMentionList(false);
+    setSelectedFile(null);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (showMentionList && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
-      e.preventDefault();
-      setMentionIndex((prev) => {
-        const max = mentionCandidates.length - 1;
-        return e.key === "ArrowUp" ? (prev === 0 ? max : prev - 1) : (prev === max ? 0 : prev + 1);
-      });
-    } else if (showMentionList && e.key === "Enter") {
-      e.preventDefault();
-      handleSelectMention(mentionCandidates[mentionIndex]);
-    } else if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     } else if (e.key === "Enter" && e.shiftKey) {
+      e.preventDefault();
       setInput((prev) => prev + "\n");
     }
   };
 
-  const handleChange = (value: string) => {
-    setInput(value);
-    const match = value.match(/@([a-zA-Z0-9_]*)$/);
-    if (match) {
-      const partial = match[1].toLowerCase();
-      const filtered = users.filter((u) => u.toLowerCase().includes(partial) && u !== currentUser);
-      setMentionCandidates(filtered);
-      setMentionIndex(0);
-      setShowMentionList(true);
-    } else {
-      setShowMentionList(false);
+  const handleFileSelectClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const reactionMap = (msg: Message): Record<string, number> => {
+    const map: Record<string, number> = {};
+    msg.reactions.forEach((r) => {
+      map[r.emoji] = (map[r.emoji] || 0) + 1;
+    });
+    return map;
+  };
+
+  const handleSelectReaction = async (index: number, emoji: string) => {
+    if (isReacting) return;
+    setIsReacting(true);
+    try {
+      const action = await onReactMessage(index, emoji);
+      if (action === "added") {
+        addNotification({
+          type: "reaction",
+          sourceUser: currentUser,
+          targetChannel: selectedChannel,
+          emoji,
+          timestamp: new Date().toLocaleTimeString(),
+        });
+      }
+    } finally {
+      setIsReacting(false);
     }
   };
 
-  const handleSelectMention = (user: string) => {
-    const updated = input.replace(/@([a-zA-Z0-9_]*)$/, `@${user} `);
-    setInput(updated);
-    setMentionCandidates([]);
-    setShowMentionList(false);
-    textareaRef.current?.focus();
-  };
-
-  const handleSelectReaction = (index: number, emoji: string) => {
-    const alreadyReacted = messages[index].reactions.some(
-      (r) => r.user === currentUser && r.emoji === emoji
+  const highlightMentions = (text: string): (string | JSX.Element)[] =>
+    text.split(/(\s+)/).map((word, i) =>
+      word.startsWith("@") ? (
+        <span key={i} style={{ color: "#87cefa", fontWeight: 500 }}>
+          {word}
+        </span>
+      ) : (
+        word
+      )
     );
-    const newSelected = {
-      ...selectedReactions,
-      [index]: alreadyReacted ? null : emoji,
-    };
-    setSelectedReactions(newSelected);
-    onReactMessage(index, emoji);
-  };
-
-  const highlightMentions = (text: string): (string | JSX.Element)[] => {
-    return text.split(/(\s+)/).map((word, i) => {
-      if (word.startsWith("@")) {
-        return <span key={i} style={{ color: "#87cefa", fontWeight: 500 }}>{word}</span>;
-      }
-      return word;
-    });
-  };
 
   return (
-    <div style={{ flex: 1, padding: "1rem", display: "flex", flexDirection: "column", background: "#36393f", color: "white" }}>
-      <h2># {selectedChannel}</h2>
-      <div style={{ flex: 1, overflowY: "auto", marginBottom: "1rem" }}>
-        {messages.map((msg, idx) => {
-          const reactionMap: Record<string, number> = {};
-          msg.reactions.forEach((r) => {
-            reactionMap[r.emoji] = (reactionMap[r.emoji] || 0) + 1;
-          });
+    <div style={{ flex: 1, display: "flex", flexDirection: "row", background: "#36393f", color: "white" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+        <h2 style={{ padding: "1rem" }}># {selectedChannel}</h2>
 
-          return (
-            <div key={idx} style={{ marginBottom: "1rem", background: "#444", padding: "0.5rem", borderRadius: "8px" }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: "0 1rem" }}>
+          {localMessages.map((msg, idx) => (
+            <div key={idx} style={{ background: "#444", marginBottom: "1rem", padding: "0.5rem", borderRadius: "8px" }}>
               <div><strong>{msg.user}</strong> <small>{msg.timestamp}</small></div>
               <div>{highlightMentions(msg.text)}</div>
-              <div style={{ marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                {Object.entries(reactionMap).map(([emoji, count]) => (
-                  <div
+
+              {msg.fileUrl && (
+  <div style={{ marginTop: "0.5rem" }}>
+    {msg.fileType?.startsWith("image/") ? (
+      <div
+        style={{
+          position: "relative",
+          width: "200px",
+          height: "200px",
+          cursor: "pointer",
+          borderRadius: "8px",
+          overflow: "hidden",
+        }}
+        onClick={() => setModalImageUrl(msg.fileUrl ?? null)}
+      >
+        <Image
+          src={msg.fileUrl}
+          alt="uploaded image"
+          layout="fill"
+          objectFit="contain"
+          unoptimized
+        />
+      </div>
+    ) : (
+      <a
+        href={msg.fileUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ color: "#87cefa", textDecoration: "underline" }}
+      >
+        📎 {msg.fileType ? `[${msg.fileType}]` : "ファイル"}
+      </a>
+    )}
+  </div>
+)}
+
+
+              {/* リアクション */}
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
+                {Object.entries(reactionMap(msg)).map(([emoji, count]) => (
+                  <button
                     key={emoji}
+                    onClick={() => handleSelectReaction(idx, emoji)}
                     style={{
                       background: "#555",
                       borderRadius: "1rem",
@@ -117,49 +219,119 @@ const ChannelChat = ({ selectedChannel, messages = [], onSendMessage, onReactMes
                       display: "flex",
                       alignItems: "center",
                       gap: "0.3rem",
+                      cursor: "pointer",
                     }}
                   >
                     {emoji} <span style={{ fontSize: "0.75rem" }}>{count}</span>
-                  </div>
+                  </button>
                 ))}
                 <ReactionSelector
-                  selectedEmoji={selectedReactions[idx] || null}
+                  selectedEmoji={null}
                   onSelect={(emoji) => handleSelectReaction(idx, emoji)}
-                  reactionCounts={reactionMap}
+                  reactionCounts={reactionMap(msg)}
                 />
               </div>
+
+              {/* スレッドボタン */}
+              {(msg.replies && msg.replies.length > 0) ? (
+  <button
+    onClick={() => setOpenThreadMessage(msg)}
+    style={{
+      background: "transparent",
+      border: "none",
+      color: "#bbb",
+      cursor: "pointer",
+      marginTop: "0.5rem",
+    }}
+  >
+    💬 {msg.replies.length}件の返信を見る
+  </button>
+) : (
+  <button
+    onClick={() => setOpenThreadMessage(msg)}
+    style={{
+      background: "transparent",
+      border: "none",
+      color: "#bbb",
+      cursor: "pointer",
+      marginTop: "0.5rem",
+    }}
+  >
+    💬 スレッドで返信
+  </button>
+)}
+
+{/* 👇 モーダル表示は mapの外に！ */}
+{modalImageUrl && (
+  <ImageModal imageUrl={modalImageUrl} onClose={() => setModalImageUrl(null)} />
+)}
+
             </div>
-          );
-        })}
+          ))}
+        </div>
+
+        {/* メッセージ入力 */}
+        <div style={{ position: "relative", padding: "1rem" }}>
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="メッセージを入力...(Enter送信 / Shift+Enter改行)"
+            style={{ width: "100%", padding: "0.5rem", borderRadius: "6px", border: "none", resize: "vertical", minHeight: "3rem" }}
+          />
+          <div style={{ display: "flex", alignItems: "center", marginTop: "0.5rem" }}>
+            <button
+              type="button"
+              onClick={handleFileSelectClick}
+              style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: "1.5rem" }}
+            >
+              📎
+            </button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              style={{ display: "none" }}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                if (e.target.files && e.target.files.length > 0) {
+                  setSelectedFile(e.target.files[0]);
+                }
+              }}
+            />
+            {selectedFile && (
+              <div style={{ fontSize: "0.9rem", marginLeft: "0.5rem" }}>
+                📎 {selectedFile.name}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      <div style={{ position: "relative" }}>
-        <textarea
-          ref={textareaRef}
-          style={{ width: "100%", padding: "0.5rem", borderRadius: "6px", border: "none", resize: "vertical", minHeight: "3rem" }}
-          value={input}
-          onChange={(e) => handleChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="メッセージを入力... (Enterで送信 / Shift+Enterで改行)"
+      {/* スレッドエリア */}
+      {openThreadMessage && (
+        <ThreadArea
+          parentMessage={openThreadMessage}
+          replies={openThreadMessage.replies || []}
+          onClose={() => setOpenThreadMessage(null)}
+          onSendReply={async (text, file) => {
+            const newReply = await handleSendThreadReply(text, openThreadMessage, file);
+            if (!newReply) return newReply;
+            setOpenThreadMessage((prev) => {
+              if (!prev) return null;
+              return { ...prev, replies: [...(prev.replies || []), newReply] };
+            });
+            setLocalMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === openThreadMessage.id
+                  ? { ...msg, replies: [...(msg.replies || []), newReply] }
+                  : msg
+              )
+            );
+            return newReply;
+          }}
+          onReactReply={async () => "added"}
         />
-        {showMentionList && mentionCandidates.length > 0 && (
-          <ul style={{ position: "absolute", bottom: "3.5rem", left: 0, background: "#222", color: "white", listStyle: "none", padding: "0.5rem", borderRadius: "6px", zIndex: 10 }}>
-            {mentionCandidates.map((user, i) => (
-              <li
-                key={user}
-                onClick={() => handleSelectMention(user)}
-                style={{
-                  padding: "0.3rem 0.5rem",
-                  cursor: "pointer",
-                  background: mentionIndex === i ? "#555" : "transparent",
-                }}
-              >
-                @{user}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      )}
     </div>
   );
 };

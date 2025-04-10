@@ -26,7 +26,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(404).json({ error: "User not found" });
     }
 
-    res.status(200).json(user.workspaces);
+    // 🛠ここでcreatedAtを文字列に変換する！
+    const formattedWorkspaces = user.workspaces.map((ws) => ({
+      id: ws.id,
+      name: ws.name,
+      createdAt: ws.createdAt.toISOString(),  // ⭐ここが超大事！
+    }));
+
+    res.status(200).json(formattedWorkspaces);
   } catch (err) {
     console.error("❌ ワークスペース一覧取得エラー:", err);
     res.status(500).json({ error: "Internal server error" });

@@ -1,17 +1,46 @@
 import { useSession, signIn, signOut } from "next-auth/react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 
 export default function Home() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const [isRedirecting, setIsRedirecting] = useState(true);
 
-  // 👇 ログイン済みなら /onboarding に遷移
   useEffect(() => {
+    if (status === "loading") return; // ローディング中は何もしない
+
     if (status === "authenticated") {
-      router.push("/workspace/onboarding");
+      // ログイン済みの場合、ワークスペースに所属しているかを確認
+      const checkUserWorkspaces = async () => {
+        try {
+          // APIでユーザーのワークスペース情報を確認
+          const res = await fetch("/api/user/check-workspaces");
+          const data = await res.json();
+
+          // 所属しているワークスペースがあれば、workspaceに遷移
+          if (data.hasWorkspace) {
+            router.push("/workspace"); // 所属していればワークスペースに遷移
+          } else {
+            router.push("/workspace/onboarding"); // 所属していなければonboardingに遷移
+          }
+        } catch (error) {
+          console.error("ユーザーのワークスペース確認エラー:", error);
+          router.push("/workspace/onboarding");
+        } finally {
+          setIsRedirecting(false); // リダイレクト処理完了
+        }
+      };
+
+      checkUserWorkspaces();
+    } else {
+      setIsRedirecting(false); // ログインしていない場合もリダイレクトしない
     }
   }, [status, router]);
+
+  if (isRedirecting) {
+    return <div style={{ color: "#fff", padding: "2rem" }}>ロード中...</div>;
+  }
 
   return (
     <div
