@@ -1,0 +1,107 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  users     User[]   @relation("WorkspaceMembers")
+  channels  Channel[]
+  createdAt DateTime @default(now())
+}
+
+model User {
+  id             String    @id @default(cuid())
+  name           String?
+  email          String?   @unique
+  emailVerified  DateTime?
+  image          String?
+  messages       Message[]
+  channels       Channel[]  @relation("ChannelUsers")
+  workspaces     Workspace[] @relation("WorkspaceMembers")
+  accounts       Account[]
+  sessions       Session[]
+  createdAt      DateTime   @default(now())
+  reactions   Reaction[]
+}
+
+model Account {
+  id                 String   @id @default(cuid())
+  userId             String
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String?
+  access_token       String?
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String?
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Channel {
+  id           String    @id @default(cuid())
+  name         String
+  workspaceId  String?
+  workspace    Workspace? @relation(fields: [workspaceId], references: [id])
+  users        User[]    @relation("ChannelUsers")
+  messages     Message[]
+  createdAt    DateTime  @default(now())
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  text      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  timestamp DateTime @default(now())
+  userId    String
+  channelId String
+  parentId  String?   // 追加（リプライ用）
+  fileUrl   String?   // 追加（ファイル添付URL）
+  fileType  String?   // 追加（ファイルタイプ）
+  reactions   Reaction[]
+  user      User     @relation(fields: [userId], references: [id])
+  channel   Channel  @relation(fields: [channelId], references: [id])
+  parent    Message? @relation("ReplyParent", fields: [parentId], references: [id])
+  replies   Message[] @relation("ReplyParent")
+
+  @@index([channelId])
+  @@index([userId])
+}
+
+
+model Reaction {
+  id        String   @id @default(uuid())
+  emoji     String
+  userId    String
+  messageId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id])
+  message Message @relation(fields: [messageId], references: [id])
+
+  @@index([userId])
+  @@index([messageId])
+}
