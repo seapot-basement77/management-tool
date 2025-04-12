@@ -3,9 +3,9 @@ import { Message } from "../types/Message";
 import { Notification } from "../types/Notification";
 import ReactionSelector from "./ReactionSelector";
 import ThreadArea from "./ThreadArea";
-import {JSX} from "react";
-import Image from "next/image"; // 👈 必須
-import ImageModal from "./ImageModal"; // ← 追加
+import Image from "next/image";
+import ImageModal from "./ImageModal";
+import { JSX } from "react";
 
 interface Props {
   selectedChannel: string;
@@ -14,6 +14,8 @@ interface Props {
   currentUser: string;
   users: string[];
   addNotification: (notification: Notification) => void;
+  fetchMessages: (channelName?: string) => Promise<void>;
+  setMessagesByChannel: React.Dispatch<React.SetStateAction<Record<string, Message[]>>>;
 }
 
 const ChannelChat = ({
@@ -22,42 +24,58 @@ const ChannelChat = ({
   onReactMessage,
   currentUser,
   addNotification,
+  setMessagesByChannel,
 }: Props) => {
   const [input, setInput] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [openThreadMessage, setOpenThreadMessage] = useState<Message | null>(null);
   const [localMessages, setLocalMessages] = useState<Message[]>([]);
+  const [modalImageUrl, setModalImageUrl] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isReacting, setIsReacting] = useState(false);
-  const [modalImageUrl, setModalImageUrl] = useState<string | null>(null);
 
   useEffect(() => {
     setLocalMessages(messages);
   }, [messages]);
 
-  // 普通メッセージ送信
   const handleSendChannelMessage = async (text: string, file?: File | null): Promise<Message | undefined> => {
     if (!selectedChannel) return;
     const formData = new FormData();
     formData.append("text", text);
     if (file) formData.append("file", file);
 
-    const res = await fetch(`/api/channels/${selectedChannel}/messages`, {
+    const res = await fetch(`/api/channels/${encodeURIComponent(selectedChannel)}/messages`, {
       method: "POST",
       body: formData,
     });
 
     if (res.ok) {
       const newMessage: Message = await res.json();
-      setLocalMessages((prev) => [...prev, newMessage]);
       return newMessage;
     } else {
       console.error("メッセージ送信エラー:", await res.json());
     }
   };
 
-  // スレッド返信送信
+  const handleSend = async () => {
+    const trimmed = input.trim();
+    if (!trimmed && !selectedFile) return;
+
+    const newMsg = await handleSendChannelMessage(trimmed, selectedFile);
+
+    if (newMsg) {
+      setLocalMessages((prev) => [...prev, newMsg]);
+      setMessagesByChannel((prev) => ({
+        ...prev,
+        [selectedChannel]: [...(prev[selectedChannel] || []), newMsg],
+      }));
+    }
+
+    setInput("");
+    setSelectedFile(null);
+  };
+
   const handleSendThreadReply = async (text: string, parentMessage: Message, file?: File | null): Promise<Message | undefined> => {
     if (!selectedChannel) return;
     const formData = new FormData();
@@ -65,7 +83,7 @@ const ChannelChat = ({
     formData.append("replyToMessageId", parentMessage.id);
     if (file) formData.append("file", file);
 
-    const res = await fetch(`/api/channels/${selectedChannel}/messages`, {
+    const res = await fetch(`/api/channels/${encodeURIComponent(selectedChannel)}/messages`, {
       method: "POST",
       body: formData,
     });
@@ -76,34 +94,6 @@ const ChannelChat = ({
     } else {
       console.error("スレッド返信送信エラー:", await res.json());
     }
-  };
-
-  // メッセージ送信ボタン押下
-  const handleSend = async () => {
-    const trimmed = input.trim();
-    if (!trimmed && !selectedFile) return;
-
-    if (openThreadMessage) {
-      const newReply = await handleSendThreadReply(trimmed, openThreadMessage, selectedFile);
-      if (newReply) {
-        setOpenThreadMessage((prev) => {
-          if (!prev) return null;
-          return { ...prev, replies: [...(prev.replies || []), newReply] };
-        });
-        setLocalMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === openThreadMessage.id
-              ? { ...msg, replies: [...(msg.replies || []), newReply] }
-              : msg
-          )
-        );
-      }
-    } else {
-      await handleSendChannelMessage(trimmed, selectedFile);
-    }
-
-    setInput("");
-    setSelectedFile(null);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -118,14 +108,6 @@ const ChannelChat = ({
 
   const handleFileSelectClick = () => {
     fileInputRef.current?.click();
-  };
-
-  const reactionMap = (msg: Message): Record<string, number> => {
-    const map: Record<string, number> = {};
-    msg.reactions.forEach((r) => {
-      map[r.emoji] = (map[r.emoji] || 0) + 1;
-    });
-    return map;
   };
 
   const handleSelectReaction = async (index: number, emoji: string) => {
@@ -147,12 +129,18 @@ const ChannelChat = ({
     }
   };
 
+  const reactionMap = (msg: Message): Record<string, number> => {
+    const map: Record<string, number> = {};
+    msg.reactions.forEach((r) => {
+      map[r.emoji] = (map[r.emoji] || 0) + 1;
+    });
+    return map;
+  };
+
   const highlightMentions = (text: string): (string | JSX.Element)[] =>
     text.split(/(\s+)/).map((word, i) =>
       word.startsWith("@") ? (
-        <span key={i} style={{ color: "#87cefa", fontWeight: 500 }}>
-          {word}
-        </span>
+        <span key={i} style={{ color: "#87cefa", fontWeight: 500 }}>{word}</span>
       ) : (
         word
       )
@@ -165,47 +153,27 @@ const ChannelChat = ({
 
         <div style={{ flex: 1, overflowY: "auto", padding: "0 1rem" }}>
           {localMessages.map((msg, idx) => (
-            <div key={idx} style={{ background: "#444", marginBottom: "1rem", padding: "0.5rem", borderRadius: "8px" }}>
+            <div key={msg.id} style={{ background: "#444", marginBottom: "1rem", padding: "0.5rem", borderRadius: "8px" }}>
               <div><strong>{msg.user}</strong> <small>{msg.timestamp}</small></div>
               <div>{highlightMentions(msg.text)}</div>
 
               {msg.fileUrl && (
-  <div style={{ marginTop: "0.5rem" }}>
-    {msg.fileType?.startsWith("image/") ? (
-      <div
-        style={{
-          position: "relative",
-          width: "200px",
-          height: "200px",
-          cursor: "pointer",
-          borderRadius: "8px",
-          overflow: "hidden",
-        }}
-        onClick={() => setModalImageUrl(msg.fileUrl ?? null)}
-      >
-        <Image
-          src={msg.fileUrl}
-          alt="uploaded image"
-          layout="fill"
-          objectFit="contain"
-          unoptimized
-        />
-      </div>
-    ) : (
-      <a
-        href={msg.fileUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        style={{ color: "#87cefa", textDecoration: "underline" }}
-      >
-        📎 {msg.fileType ? `[${msg.fileType}]` : "ファイル"}
-      </a>
-    )}
-  </div>
-)}
+                <div style={{ marginTop: "0.5rem" }}>
+                  {msg.fileType?.startsWith("image/") ? (
+                    <div
+                      style={{ position: "relative", width: "200px", height: "200px", cursor: "pointer", borderRadius: "8px", overflow: "hidden" }}
+                      onClick={() => setModalImageUrl(msg.fileUrl ?? null)}
+                    >
+                      <Image src={msg.fileUrl} alt="uploaded image" layout="fill" objectFit="contain" unoptimized />
+                    </div>
+                  ) : (
+                    <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#87cefa", textDecoration: "underline" }}>
+                      📎 {msg.fileType ? `[${msg.fileType}]` : "ファイル"}
+                    </a>
+                  )}
+                </div>
+              )}
 
-
-              {/* リアクション */}
               <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
                 {Object.entries(reactionMap(msg)).map(([emoji, count]) => (
                   <button
@@ -232,45 +200,22 @@ const ChannelChat = ({
                 />
               </div>
 
-              {/* スレッドボタン */}
-              {(msg.replies && msg.replies.length > 0) ? (
-  <button
-    onClick={() => setOpenThreadMessage(msg)}
-    style={{
-      background: "transparent",
-      border: "none",
-      color: "#bbb",
-      cursor: "pointer",
-      marginTop: "0.5rem",
-    }}
-  >
-    💬 {msg.replies.length}件の返信を見る
-  </button>
-) : (
-  <button
-    onClick={() => setOpenThreadMessage(msg)}
-    style={{
-      background: "transparent",
-      border: "none",
-      color: "#bbb",
-      cursor: "pointer",
-      marginTop: "0.5rem",
-    }}
-  >
-    💬 スレッドで返信
-  </button>
-)}
-
-{/* 👇 モーダル表示は mapの外に！ */}
-{modalImageUrl && (
-  <ImageModal imageUrl={modalImageUrl} onClose={() => setModalImageUrl(null)} />
-)}
-
+              <button
+                onClick={() => setOpenThreadMessage(msg)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#bbb",
+                  cursor: "pointer",
+                  marginTop: "0.5rem",
+                }}
+              >
+                💬 {msg.replies?.length ? `${msg.replies.length}件の返信を見る` : "スレッドで返信"}
+              </button>
             </div>
           ))}
         </div>
 
-        {/* メッセージ入力 */}
         <div style={{ position: "relative", padding: "1rem" }}>
           <textarea
             ref={textareaRef}
@@ -307,30 +252,89 @@ const ChannelChat = ({
         </div>
       </div>
 
-      {/* スレッドエリア */}
       {openThreadMessage && (
         <ThreadArea
           parentMessage={openThreadMessage}
           replies={openThreadMessage.replies || []}
           onClose={() => setOpenThreadMessage(null)}
           onSendReply={async (text, file) => {
+            if (!openThreadMessage) return;
             const newReply = await handleSendThreadReply(text, openThreadMessage, file);
-            if (!newReply) return newReply;
-            setOpenThreadMessage((prev) => {
-              if (!prev) return null;
-              return { ...prev, replies: [...(prev.replies || []), newReply] };
+            if (!newReply) return;
+            setOpenThreadMessage((prev) => prev ? { ...prev, replies: [...(prev.replies || []), newReply] } : null);
+            setLocalMessages((prev) => {
+              const updated = [...prev];
+              const idx = updated.findIndex(msg => msg.id === openThreadMessage.id);
+              if (idx !== -1) {
+                updated[idx] = { ...updated[idx], replies: [...(updated[idx].replies || []), newReply] };
+              }
+              return updated;
             });
-            setLocalMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === openThreadMessage.id
-                  ? { ...msg, replies: [...(msg.replies || []), newReply] }
-                  : msg
-              )
-            );
             return newReply;
           }}
-          onReactReply={async () => "added"}
+          onReactReply={async (replyIndex, emoji) => {
+            if (!openThreadMessage) return "removed";
+            const parentIdx = localMessages.findIndex(msg => msg.id === openThreadMessage.id);
+            if (parentIdx === -1) return "removed";
+          
+            if (replyIndex === -1) {
+              const action = await onReactMessage(parentIdx, emoji);
+              if (action === "added") {
+                addNotification({
+                  type: "reaction",
+                  sourceUser: currentUser,
+                  targetChannel: selectedChannel,
+                  emoji,
+                  timestamp: new Date().toLocaleTimeString(),
+                });
+              }
+              return action;
+            } else {
+              const reply = openThreadMessage.replies?.[replyIndex];
+              if (!reply) return "removed";
+              const res = await fetch(`/api/channels/${encodeURIComponent(selectedChannel)}/reactions`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ messageId: reply.id, emoji }),
+              });
+          
+              if (!res.ok) {
+                console.error("リプライリアクションエラー:", await res.json());
+                return "removed";
+              }
+          
+              setOpenThreadMessage((prev) => {
+                if (!prev) return null;
+                const updatedReplies = [...(prev.replies || [])];
+                const target = updatedReplies[replyIndex];
+                if (!target) return prev;
+                const already = target.reactions.find(r => r.user === currentUser && r.emoji === emoji);
+                if (already) {
+                  target.reactions = target.reactions.filter(r => !(r.user === currentUser && r.emoji === emoji));
+                } else {
+                  target.reactions = [...target.reactions, { user: currentUser, emoji }];
+                }
+                return { ...prev, replies: updatedReplies };
+              });
+          
+              // ✨ リプライへのリアクションも通知する
+              addNotification({
+                type: "reaction",
+                sourceUser: currentUser,
+                targetChannel: selectedChannel,
+                emoji,
+                timestamp: new Date().toLocaleTimeString(),
+              });
+          
+              return "added";
+            }
+          }}
+          
         />
+      )}
+
+      {modalImageUrl && (
+        <ImageModal imageUrl={modalImageUrl} onClose={() => setModalImageUrl(null)} />
       )}
     </div>
   );

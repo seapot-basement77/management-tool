@@ -10,26 +10,72 @@ interface Props {
   replies: Message[];
   onClose: () => void;
   onSendReply: (text: string, file?: File | null) => Promise<Message | undefined>;
+  onReactReply: (replyIndex: number, emoji: string) => Promise<"added" | "removed">;
 }
 
-const ThreadArea = ({ parentMessage, replies, onClose, onSendReply }: Props) => {
+const ThreadArea = ({ parentMessage, replies, onClose, onSendReply, onReactReply }: Props) => {
   const [modalImageUrl, setModalImageUrl] = useState<string | null>(null);
+  const [isReacting, setIsReacting] = useState(false);
   const [input, setInput] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [localReplies, setLocalReplies] = useState<Message[]>([]);
+  const [localReplies, setLocalReplies] = useState<Message[]>(replies);
   const [localParentMessage, setLocalParentMessage] = useState<Message>(parentMessage);
-  const [isReacting, setIsReacting] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLocalReplies(replies);
+  }, [replies]);
+
+  useEffect(() => {
     setLocalParentMessage(parentMessage);
-  }, [replies, parentMessage]);
+  }, [parentMessage]);
+
+  const handleSelectReaction = async (index: number, emoji: string) => {
+    if (isReacting) return;
+    setIsReacting(true);
+    try {
+      const action = await onReactReply(index, emoji);
+
+      if (action === "added" || action === "removed") {
+        if (index === -1) {
+          setLocalParentMessage((prev) => {
+            const reactions = [...(prev.reactions || [])];
+            const already = reactions.find((r) => r.emoji === emoji);
+            if (already && action === "removed") {
+              return { ...prev, reactions: reactions.filter((r) => r.emoji !== emoji) };
+            } else if (!already && action === "added") {
+              return { ...prev, reactions: [...reactions, { user: "you", emoji }] };
+            }
+            return prev;
+          });
+        } else {
+          setLocalReplies((prev) => {
+            const updated = [...prev];
+            const target = updated[index];
+            if (!target) return prev;
+            const reactions = [...(target.reactions || [])];
+            const already = reactions.find((r) => r.emoji === emoji);
+            if (already && action === "removed") {
+              updated[index] = { ...target, reactions: reactions.filter((r) => r.emoji !== emoji) };
+            } else if (!already && action === "added") {
+              updated[index] = { ...target, reactions: [...reactions, { user: "you", emoji }] };
+            }
+            return updated;
+          });
+        }
+      }
+    } finally {
+      setIsReacting(false);
+    }
+  };
 
   const highlightMentions = (text: string): (string | JSX.Element)[] =>
     text.split(/(\s+)/).map((word, i) =>
       word.startsWith("@") ? (
-        <span key={i} style={{ color: "#87cefa", fontWeight: 500 }}>{word}</span>
+        <span key={i} style={{ color: "#87cefa", fontWeight: 500 }}>
+          {word}
+        </span>
       ) : (
         word
       )
@@ -43,44 +89,13 @@ const ThreadArea = ({ parentMessage, replies, onClose, onSendReply }: Props) => 
     return map;
   };
 
-  const handleSelectReaction = async (index: number, emoji: string) => {
-    if (isReacting) return;
-    setIsReacting(true);
-    try {
-      if (index === -1) {
-        setLocalParentMessage(prev => {
-          const updated = { ...prev };
-          const already = updated.reactions.find(r => r.user === "自分" && r.emoji === emoji);
-          updated.reactions = already
-            ? updated.reactions.filter(r => !(r.user === "自分" && r.emoji === emoji))
-            : [...updated.reactions, { user: "自分", emoji }];
-          return updated;
-        });
-      } else {
-        setLocalReplies(prev => {
-          const updated = [...prev];
-          const reply = updated[index];
-          if (!reply) return prev;
-          const already = reply.reactions.find(r => r.user === "自分" && r.emoji === emoji);
-          reply.reactions = already
-            ? reply.reactions.filter(r => !(r.user === "自分" && r.emoji === emoji))
-            : [...reply.reactions, { user: "自分", emoji }];
-          updated[index] = reply;
-          return updated;
-        });
-      }
-    } finally {
-      setIsReacting(false);
-    }
-  };
-
   const handleSendReply = async () => {
     const trimmed = input.trim();
     if (!trimmed && !selectedFile) return;
 
     const newReply = await onSendReply(trimmed, selectedFile);
     if (newReply) {
-      setLocalReplies(prev => [...prev, newReply]);
+      setLocalReplies((prev) => [...prev, newReply]);
       setInput("");
       setSelectedFile(null);
     }
@@ -127,7 +142,16 @@ const ThreadArea = ({ parentMessage, replies, onClose, onSendReply }: Props) => 
               <button
                 key={emoji}
                 onClick={() => handleSelectReaction(-1, emoji)}
-                style={{ background: "#555", borderRadius: "1rem", padding: "0.2rem 0.6rem", display: "flex", alignItems: "center", gap: "0.3rem" }}
+                style={{
+                  background: "#555",
+                  borderRadius: "1rem",
+                  padding: "0.2rem 0.6rem",
+                  fontSize: "0.9rem",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.3rem",
+                  cursor: "pointer",
+                }}
               >
                 {emoji} <span style={{ fontSize: "0.75rem" }}>{count}</span>
               </button>
@@ -159,13 +183,22 @@ const ThreadArea = ({ parentMessage, replies, onClose, onSendReply }: Props) => 
               </div>
             )}
 
-            {/* リアクション */}
+            {/* リプライリアクション */}
             <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
               {Object.entries(reactionMap(reply)).map(([emoji, count]) => (
                 <button
                   key={emoji}
                   onClick={() => handleSelectReaction(idx, emoji)}
-                  style={{ background: "#666", borderRadius: "1rem", padding: "0.2rem 0.6rem", display: "flex", alignItems: "center", gap: "0.3rem" }}
+                  style={{
+                    background: "#666",
+                    borderRadius: "1rem",
+                    padding: "0.2rem 0.6rem",
+                    fontSize: "0.9rem",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.3rem",
+                    cursor: "pointer",
+                  }}
                 >
                   {emoji} <span style={{ fontSize: "0.75rem" }}>{count}</span>
                 </button>
@@ -176,7 +209,7 @@ const ThreadArea = ({ parentMessage, replies, onClose, onSendReply }: Props) => 
         ))}
       </div>
 
-      {/* 返信入力欄 */}
+      {/* 返信入力エリア */}
       <div style={{ padding: "1rem", borderTop: "1px solid #555" }}>
         <textarea
           value={input}
@@ -211,7 +244,7 @@ const ThreadArea = ({ parentMessage, replies, onClose, onSendReply }: Props) => 
         </div>
       </div>
 
-      {/* 画像拡大モーダル */}
+      {/* モーダル */}
       {modalImageUrl && (
         <ImageModal imageUrl={modalImageUrl} onClose={() => setModalImageUrl(null)} />
       )}

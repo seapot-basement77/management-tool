@@ -26,128 +26,122 @@ export default function WorkspaceHome() {
 
   const currentUser = session?.user?.name || "ゲスト";
 
-  const fetchMessages = useCallback(async () => {
-    if (!selectedChannel) return;
+  // --- fetch messages
+  const fetchMessages = useCallback(async (channelName?: string) => {
+    const target = channelName || selectedChannel;
+    if (!target) return;
     try {
-      const res = await fetch(`/api/channels/${encodeURIComponent(selectedChannel)}/messages`);
-      if (!res.ok) throw new Error(`Failed to fetch messages`);
+      const res = await fetch(`/api/channels/${encodeURIComponent(target)}/messages`);
+      if (!res.ok) throw new Error("メッセージ取得失敗");
       const data: Message[] = await res.json();
       setMessagesByChannel((prev) => ({
         ...prev,
-        [selectedChannel]: data,
+        [target]: data,
       }));
-    } catch (error) {
-      console.error("メッセージ取得エラー:", error);
+    } catch (err) {
+      console.error("🔥 メッセージ取得エラー:", err);
     }
   }, [selectedChannel]);
 
-  // ワークスペース一覧取得
+  // --- fetch channels
+  const fetchChannels = useCallback(async () => {
+    if (!currentWorkspace?.id) return;
+    try {
+      const res = await fetch(`/api/workspace/${currentWorkspace.id}/channels`);
+      if (!res.ok) throw new Error("チャネル取得失敗");
+      const data = await res.json();
+      setChannels(data);
+      if (data.length > 0) {
+        setSelectedChannel(data[0].name);
+      } else {
+        setSelectedChannel("");
+      }
+    } catch (err) {
+      console.error("🔥 チャネル取得エラー:", err);
+    }
+  }, [currentWorkspace, setChannels, setSelectedChannel]);
+
+  // --- fetch workspaces
   useEffect(() => {
     const fetchWorkspaces = async () => {
       try {
-        const res = await fetch('/api/workspace/list');
-        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        const res = await fetch("/api/workspace/list");
+        if (!res.ok) throw new Error("ワークスペース取得失敗");
         const data = await res.json();
         setWorkspaces(data);
         if (data.length > 0) {
           setCurrentWorkspace(data[0]);
         }
-      } catch (error) {
-        console.error('Failed to fetch workspaces:', error);
+      } catch (err) {
+        console.error("🔥 ワークスペース取得エラー:", err);
       }
     };
     fetchWorkspaces();
   }, [setWorkspaces, setCurrentWorkspace]);
 
-  // ワークスペース変更時チャネル一覧取得
+  // --- チャネル取得（ワークスペース変更時）
   useEffect(() => {
-    if (!currentWorkspace) return;
-    const fetchChannels = async () => {
-      try {
-        const res = await fetch(`/api/workspace/${currentWorkspace.id}/channels`);
-        if (!res.ok) throw new Error(`Failed to fetch channels`);
-        const data = await res.json();
-        setChannels(data);
-        if (data.length > 0) {
-          setSelectedChannel(data[0].name);
-        } else {
-          setSelectedChannel("");
-        }
-      } catch (error) {
-        console.error("チャネル取得エラー:", error);
-      }
-    };
-    fetchChannels();
-  }, [currentWorkspace, setChannels, setSelectedChannel]);
+    if (currentWorkspace) {
+      fetchChannels();
+    }
+  }, [currentWorkspace, fetchChannels]);
 
-  // チャネル変更時メッセージ一覧取得
+  // --- メッセージ取得（チャネル変更時 or タブ変更時）
   useEffect(() => {
-    if (!selectedChannel) return;
-    fetchMessages();
-  }, [selectedChannel, fetchMessages]);
+    if (currentTab === "Home" && selectedChannel) {
+      fetchMessages(selectedChannel);
+    }
+  }, [currentTab, selectedChannel, fetchMessages]);
 
-  // メッセージリアクション
+  // --- リアクション処理
   const handleReactMessage = async (index: number, emoji: string): Promise<"added" | "removed"> => {
-    if (!selectedChannel) return "removed"; // ダミー返却
-
-    const targetMessage = messagesByChannel[selectedChannel]?.[index];
-    if (!targetMessage) return "removed";
-
+    if (!selectedChannel) return "removed";
+    const target = messagesByChannel[selectedChannel]?.[index];
+    if (!target) return "removed";
+  
     try {
       const res = await fetch(`/api/channels/${encodeURIComponent(selectedChannel)}/reactions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messageId: targetMessage.id, emoji }),
+        body: JSON.stringify({ messageId: target.id, emoji }),
       });
-
+  
       if (!res.ok) {
         console.error("リアクション送信失敗:", await res.json());
         return "removed";
       }
-
+  
       let action: "added" | "removed" = "added";
-
+  
       setMessagesByChannel((prev) => {
-        const updated = [...(prev[selectedChannel] || [])];
-        const msg = updated[index];
-
-        if (!msg) return prev;
-
-        const alreadyReacted = msg.reactions.find(
-          (r) => r.user === currentUser && r.emoji === emoji
-        );
-
-        if (alreadyReacted) {
-          msg.reactions = msg.reactions.filter(
-            (r) => !(r.user === currentUser && r.emoji === emoji)
-          );
+        const updatedMessages = [...(prev[selectedChannel] || [])];
+        const targetMessage = updatedMessages[index];
+        if (!targetMessage) return prev;
+  
+        const already = targetMessage.reactions.find(r => r.user === currentUser && r.emoji === emoji);
+        if (already) {
+          targetMessage.reactions = targetMessage.reactions.filter(r => !(r.user === currentUser && r.emoji === emoji));
           action = "removed";
         } else {
-          msg.reactions = [...msg.reactions, { user: currentUser, emoji }];
+          targetMessage.reactions = [...targetMessage.reactions, { user: currentUser, emoji }];
         }
-
-        updated[index] = msg;
-
-        return { ...prev, [selectedChannel]: updated };
+  
+        updatedMessages[index] = targetMessage;
+  
+        return {
+          ...prev,
+          [selectedChannel]: updatedMessages,
+        };
       });
-
-      setNotifications((prev) => [
-        ...prev,
-        {
-          type: "reaction",
-          sourceUser: currentUser,
-          targetChannel: selectedChannel,
-          emoji,
-          timestamp: new Date().toLocaleTimeString(),
-        },
-      ]);
-
+  
       return action;
-    } catch (error) {
-      console.error("リアクション送信エラー:", error);
+    } catch (err) {
+      console.error("🔥 リアクション送信エラー:", err);
       return "removed";
     }
   };
+  
+  
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
@@ -155,15 +149,13 @@ export default function WorkspaceHome() {
 
       {currentTab === "Home" && (
         <>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <ChannelList
-              channels={channels}
-              setChannels={setChannels}
-              selectedChannel={selectedChannel}
-              setSelectedChannel={setSelectedChannel}
-            />
-          </div>
-
+          <ChannelList
+            channels={channels}
+            setChannels={setChannels}
+            selectedChannel={selectedChannel}
+            setSelectedChannel={setSelectedChannel}
+            fetchMessages={fetchMessages}
+          />
           <ChannelChat
             selectedChannel={selectedChannel}
             messages={messagesByChannel[selectedChannel] || []}
@@ -171,6 +163,8 @@ export default function WorkspaceHome() {
             currentUser={currentUser}
             users={users}
             addNotification={(notification) => setNotifications((prev) => [...prev, notification])}
+            fetchMessages={fetchMessages}
+            setMessagesByChannel={setMessagesByChannel}
           />
         </>
       )}
@@ -181,7 +175,7 @@ export default function WorkspaceHome() {
           selectedUser={selectedUser}
           setSelectedUser={setSelectedUser}
           addUser={(u) => setUsers((prev) => [...prev, u])}
-          deleteUser={(u) => setUsers((prev) => prev.filter((user) => user !== u))}
+          deleteUser={(u) => setUsers((prev) => prev.filter(user => user !== u))}
           messages={selectedUser ? messagesByUser[selectedUser] || [] : []}
           onSendMessage={(msg) => {
             if (!selectedUser) return;
@@ -208,13 +202,11 @@ export default function WorkspaceHome() {
               const already = msg.reactions.find((r) => r.user === currentUser && r.emoji === emoji);
               if (already) {
                 msg.reactions = msg.reactions.filter((r) => !(r.user === currentUser && r.emoji === emoji));
-                updated[index] = msg;
-                return { ...prev, [selectedUser]: updated };
               } else {
                 msg.reactions = [...msg.reactions, { user: currentUser, emoji }];
-                updated[index] = msg;
-                return { ...prev, [selectedUser]: updated };
               }
+              updated[index] = msg;
+              return { ...prev, [selectedUser]: updated };
             });
             return Promise.resolve("added");
           }}

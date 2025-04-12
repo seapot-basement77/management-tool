@@ -1,3 +1,4 @@
+//api/channel/[channeklName]/reactions.ts]
 import { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../../auth/[...nextauth]";
@@ -39,14 +40,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           emoji,
         },
       });
-      
+
       if (existingReaction) {
+        // リアクション削除
         await prisma.reaction.delete({
           where: { id: existingReaction.id },
         });
-        console.log("✅ Reaction removed:", existingReaction.id); // <-- デバッグ入れる！！
-        return res.status(200).json({ action: "removed" });
+      
+        console.log("✅ Reaction removed:", existingReaction.id);
       } else {
+        // リアクション追加
         await prisma.reaction.create({
           data: {
             emoji,
@@ -54,10 +57,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             messageId,
           },
         });
+      
         console.log("✅ Reaction added");
-        return res.status(200).json({ action: "added" });
       }
       
+      // ✅ リアクションは別テーブルだから、メッセージ側を無理にupdateしない！
+      
+      return res.status(200).json({ action: existingReaction ? "removed" : "added" });
+      
+
     } catch (error) {
       console.error("リアクション送信エラー:", error);
       return res.status(500).json({ error: "Internal server error" });

@@ -1,22 +1,24 @@
 // store/channelStore.ts
 import { create } from "zustand";
 
-// ✅ フロント用 Channel 型（Prismaではなく手動定義）
-interface Channel {
+export interface Channel {
   id: string;
   name: string;
 }
 
 interface ChannelStore {
   channels: Channel[];
+  setChannels: (updater: Channel[] | ((prev: Channel[]) => Channel[])) => void;
   selectedChannel: string;
-  setChannels: (channels: Channel[]) => void;
-  setSelectedChannel: (channel: string) => void;
+  setSelectedChannel: (channelName: string) => void;
 }
 
 export const useChannelStore = create<ChannelStore>((set) => ({
   channels: [],
+  setChannels: (updater) =>
+    set((state) => ({
+      channels: typeof updater === "function" ? updater(state.channels) : updater,
+    })),
   selectedChannel: "",
-  setChannels: (channels) => set({ channels }),
-  setSelectedChannel: (channel) => set({ selectedChannel: channel }),
+  setSelectedChannel: (channelName) => set({ selectedChannel: channelName }),
 }));

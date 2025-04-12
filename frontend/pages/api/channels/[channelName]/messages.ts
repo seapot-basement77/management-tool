@@ -1,3 +1,4 @@
+// api/channels/[channelName]/messages.ts
 import { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../../auth/[...nextauth]";
@@ -25,7 +26,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method === "GET") {
-    // ⭐⭐ ここが新しく追加される！！
     try {
       const channel = await prisma.channel.findFirst({
         where: { name: channelName },
@@ -34,8 +34,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             where: { parentId: null },
             include: {
               user: true,
+              reactions: {
+                include: {
+                  user: true, // user情報も付けたいなら
+                },
+              },
               replies: {
-                include: { user: true },
+                include: {
+                  user: true,
+                  reactions: {
+                    include: { user: true },
+                  },
+                },
                 orderBy: { createdAt: "asc" },
               },
             },
@@ -43,17 +53,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           },
         },
       });
-
+  
       if (!channel) {
         return res.status(404).json({ error: "Channel not found" });
       }
-
+  
       const formattedMessages = channel.messages.map((msg) => ({
         id: msg.id,
         text: msg.text,
         user: msg.user?.name || "Unknown",
         timestamp: msg.createdAt.toISOString(),
-        reactions: [],
+        reactions: (msg.reactions || []).map((reaction) => ({
+          user: reaction.user?.name || "Unknown",
+          emoji: reaction.emoji,
+        })),
         mentions: [],
         fileUrl: msg.fileUrl || null,
         fileType: msg.fileType || null,
@@ -62,19 +75,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           text: reply.text,
           user: reply.user?.name || "Unknown",
           timestamp: reply.createdAt.toISOString(),
-          reactions: [],
+          reactions: (reply.reactions || []).map((reaction) => ({
+            user: reaction.user?.name || "Unknown",
+            emoji: reaction.emoji,
+          })),
           mentions: [],
           fileUrl: reply.fileUrl || null,
           fileType: reply.fileType || null,
         })),
       }));
-
+  
       return res.status(200).json(formattedMessages);
+  
     } catch (error) {
       console.error("❌ GETエラー:", error);
       return res.status(500).json({ error: "Internal server error" });
     }
   }
+  
 
   if (req.method === "POST") {
     // （ここはさっきまでやってたファイル送信処理そのままでOK）
